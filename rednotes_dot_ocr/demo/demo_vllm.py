@@ -28,7 +28,7 @@ def main():
     image = Image.open(image_path)
     response = inference_with_vllm(
         image,
-        prompt, 
+        prompt,
         ip=args.ip,
         port=args.port,
         temperature=0.1,

@@ -59,7 +59,9 @@ class DotsOCRForCausalLM(Qwen2ForCausalLM):
             ), f"{vision_embeddings.size(0)=}, {new_img_mask.sum()=}"
 
             inputs_embeds = inputs_embeds.masked_scatter(
-                new_img_mask.to(inputs_embeds.device).unsqueeze(-1).expand_as(inputs_embeds),
+                new_img_mask.to(inputs_embeds.device)
+                .unsqueeze(-1)
+                .expand_as(inputs_embeds),
                 vision_embeddings.to(inputs_embeds.device).type(inputs_embeds.dtype),
             )
 
@@ -82,11 +84,17 @@ class DotsOCRForCausalLM(Qwen2ForCausalLM):
         logits_to_keep: int = 0,
         **loss_kwargs,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-        assert len(input_ids) >= 1, f"empty input_ids {input_ids.shape=} will cause gradnorm nan"
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
+        assert (
+            len(input_ids) >= 1
+        ), f"empty input_ids {input_ids.shape=} will cause gradnorm nan"
         if inputs_embeds is None:
             img_mask = input_ids == self.config.image_token_id
-            inputs_embeds = self.prepare_inputs_embeds(input_ids, pixel_values, image_grid_thw, img_mask)
+            inputs_embeds = self.prepare_inputs_embeds(
+                input_ids, pixel_values, image_grid_thw, img_mask
+            )
 
         outputs = super().forward(
             inputs_embeds=inputs_embeds,
@@ -129,4 +137,3 @@ class DotsOCRForCausalLM(Qwen2ForCausalLM):
             model_inputs["pixel_values"] = pixel_values
 
         return model_inputs
-

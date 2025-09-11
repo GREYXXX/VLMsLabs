@@ -6,15 +6,15 @@ from PIL import Image
 
 
 class SupportedPdfParseMethod(enum.Enum):
-    OCR = 'ocr'
-    TXT = 'txt'
+    OCR = "ocr"
+    TXT = "txt"
 
 
 class PageInfo(BaseModel):
-    """The width and height of page
-    """
-    w: float = Field(description='the width of page')
-    h: float = Field(description='the height of page')
+    """The width and height of page"""
+
+    w: float = Field(description="the width of page")
+    h: float = Field(description="the height of page")
 
 
 def fitz_doc_to_image(doc, target_dpi=200, origin_dpi=None) -> dict:
@@ -28,6 +28,7 @@ def fitz_doc_to_image(doc, target_dpi=200, origin_dpi=None) -> dict:
         dict:  {'img': numpy array, 'width': width, 'height': height }
     """
     from PIL import Image
+
     mat = fitz.Matrix(target_dpi / 72, target_dpi / 72)
     pm = doc.get_pixmap(matrix=mat, alpha=False)
 
@@ -35,7 +36,7 @@ def fitz_doc_to_image(doc, target_dpi=200, origin_dpi=None) -> dict:
         mat = fitz.Matrix(72 / 72, 72 / 72)  # use fitz default dpi
         pm = doc.get_pixmap(matrix=mat, alpha=False)
 
-    image = Image.frombytes('RGB', (pm.width, pm.height), pm.samples)
+    image = Image.frombytes("RGB", (pm.width, pm.height), pm.samples)
     return image
 
 
@@ -49,7 +50,7 @@ def load_images_from_pdf(pdf_file, dpi=200, start_page_id=0, end_page_id=None) -
             else pdf_page_num - 1
         )
         if end_page_id > pdf_page_num - 1:
-            print('end_page_id is out of range, use images length')
+            print("end_page_id is out of range, use images length")
             end_page_id = pdf_page_num - 1
 
         for index in range(0, doc.page_count):

@@ -8,7 +8,10 @@ from transformers.models.qwen2_vl.image_processing_qwen2_vl import smart_resize
 from vllm import ModelRegistry
 from vllm.config import VllmConfig
 from vllm.model_executor.layers.sampler import SamplerOutput, get_sampler
-from vllm.model_executor.models.interfaces import MultiModalEmbeddings, SupportsMultiModal
+from vllm.model_executor.models.interfaces import (
+    MultiModalEmbeddings,
+    SupportsMultiModal,
+)
 from vllm.model_executor.models.qwen2 import Qwen2ForCausalLM
 from vllm.model_executor.models.qwen2_5_vl import (
     Qwen2_5_VLMultiModalProcessor,
@@ -76,19 +79,21 @@ class DotsOCRDummyInputsBuilder(Qwen2VLDummyInputsBuilder):
         target_width, target_height = self.info.get_image_size_with_most_features()
 
         return {
-            "image": self._get_dummy_images(width=target_width, height=target_height, num_images=num_images),
+            "image": self._get_dummy_images(
+                width=target_width, height=target_height, num_images=num_images
+            ),
         }
 
 
 class DotsOCRProcessingInfo(Qwen2_5_VLProcessingInfo):
     def get_hf_config(self) -> DotsOCRConfig:
         config = self.ctx.get_hf_config()
-        if not config.__class__.__name__ == 'DotsOCRConfig':
+        if not config.__class__.__name__ == "DotsOCRConfig":
             raise TypeError(f"Expected DotsOCRConfig, got {type(config)}")
 
         if hasattr(config, "vision_config") and isinstance(config.vision_config, dict):
             config.vision_config = DotsVisionConfig(**config.vision_config)
-            
+
         return config
 
     def get_supported_mm_limits(self) -> Mapping[str, Optional[int]]:
@@ -110,10 +115,12 @@ class DotsOCRProcessingInfo(Qwen2_5_VLProcessingInfo):
         size: Optional[dict[str, int]] = None,
         **kwargs: object,
     ) -> Qwen2VLProcessor:
-        self.get_tokenizer().image_token = "<|imgpad|>" # Ensure image token is set
+        self.get_tokenizer().image_token = "<|imgpad|>"  # Ensure image token is set
         processor = self.ctx.get_hf_processor(
             Qwen2VLProcessor,
-            image_processor=self.get_image_processor(min_pixels=min_pixels, max_pixels=max_pixels, size=size),
+            image_processor=self.get_image_processor(
+                min_pixels=min_pixels, max_pixels=max_pixels, size=size
+            ),
             **kwargs,
         )
         processor.image_token = "<|imgpad|>"
@@ -211,9 +218,13 @@ class DotsOCRForCausalLM(nn.Module, SupportsMultiModal):
 
         return get_sampler()
 
-    def _validate_and_reshape_mm_tensor(self, mm_input: object, name: str) -> torch.Tensor:
+    def _validate_and_reshape_mm_tensor(
+        self, mm_input: object, name: str
+    ) -> torch.Tensor:
         if not isinstance(mm_input, (torch.Tensor, list)):
-            raise ValueError(f"Incorrect type of {name}. " f"Got type: {type(mm_input)}")
+            raise ValueError(
+                f"Incorrect type of {name}. " f"Got type: {type(mm_input)}"
+            )
         if isinstance(mm_input, torch.Tensor):
             if mm_input.ndim == 2:
                 return mm_input
@@ -227,7 +238,9 @@ class DotsOCRForCausalLM(nn.Module, SupportsMultiModal):
         else:
             return torch.concat(mm_input)
 
-    def _parse_and_validate_image_input(self, **kwargs: object) -> Optional[DotsOCRImageInputs]:
+    def _parse_and_validate_image_input(
+        self, **kwargs: object
+    ) -> Optional[DotsOCRImageInputs]:
         pixel_values = kwargs.pop("pixel_values", None)
         image_embeds = kwargs.pop("image_embeds", None)
         image_grid_thw = kwargs.pop("image_grid_thw", None)
@@ -236,24 +249,42 @@ class DotsOCRForCausalLM(nn.Module, SupportsMultiModal):
             return None
 
         if pixel_values is not None:
-            pixel_values = self._validate_and_reshape_mm_tensor(pixel_values, "image pixel values")
-            image_grid_thw = self._validate_and_reshape_mm_tensor(image_grid_thw, "image grid_thw")
+            pixel_values = self._validate_and_reshape_mm_tensor(
+                pixel_values, "image pixel values"
+            )
+            image_grid_thw = self._validate_and_reshape_mm_tensor(
+                image_grid_thw, "image grid_thw"
+            )
 
             if not isinstance(pixel_values, (torch.Tensor, list)):
-                raise ValueError("Incorrect type of image pixel values. " f"Got type: {type(pixel_values)}")
+                raise ValueError(
+                    "Incorrect type of image pixel values. "
+                    f"Got type: {type(pixel_values)}"
+                )
 
             return DotsOCRImagePixelInputs(
-                type="pixel_values", pixel_values=pixel_values, image_grid_thw=image_grid_thw
+                type="pixel_values",
+                pixel_values=pixel_values,
+                image_grid_thw=image_grid_thw,
             )
 
         if image_embeds is not None:
-            image_embeds = self._validate_and_reshape_mm_tensor(image_embeds, "image embeds")
-            image_grid_thw = self._validate_and_reshape_mm_tensor(image_grid_thw, "image grid_thw")
+            image_embeds = self._validate_and_reshape_mm_tensor(
+                image_embeds, "image embeds"
+            )
+            image_grid_thw = self._validate_and_reshape_mm_tensor(
+                image_grid_thw, "image grid_thw"
+            )
 
             if not isinstance(image_embeds, torch.Tensor):
-                raise ValueError("Incorrect type of image embeddings. " f"Got type: {type(image_embeds)}")
+                raise ValueError(
+                    "Incorrect type of image embeddings. "
+                    f"Got type: {type(image_embeds)}"
+                )
             return DotsOCRImageEmbeddingInputs(
-                type="image_embeds", image_embeds=image_embeds, image_grid_thw=image_grid_thw
+                type="image_embeds",
+                image_embeds=image_embeds,
+                image_grid_thw=image_grid_thw,
             )
 
     def vision_forward(self, pixel_values: torch.Tensor, image_grid_thw: torch.Tensor):
@@ -269,7 +300,9 @@ class DotsOCRForCausalLM(nn.Module, SupportsMultiModal):
         tp = get_tensor_model_parallel_world_size()
 
         image_grid_thw_chunk = image_grid_thw.chunk(tp)
-        image_sizes_consum = torch.tensor([i.prod(-1).sum() for i in image_grid_thw_chunk]).cumsum(dim=0)
+        image_sizes_consum = torch.tensor(
+            [i.prod(-1).sum() for i in image_grid_thw_chunk]
+        ).cumsum(dim=0)
         merge_size_square = self.vision_tower.config.spatial_merge_size**2
         image_embedding = torch.zeros(
             (
@@ -285,14 +318,20 @@ class DotsOCRForCausalLM(nn.Module, SupportsMultiModal):
             idx_end = image_sizes_consum[tp_rank].item()
             pixel_values_part = pixel_values[idx_start:idx_end]
             image_grid_thw_part = image_grid_thw_chunk[tp_rank]
-            image_embedding_part = self.vision_tower(pixel_values_part, image_grid_thw_part)
-            image_embedding[idx_start // merge_size_square : idx_end // merge_size_square] = image_embedding_part
+            image_embedding_part = self.vision_tower(
+                pixel_values_part, image_grid_thw_part
+            )
+            image_embedding[
+                idx_start // merge_size_square : idx_end // merge_size_square
+            ] = image_embedding_part
 
         group = get_tensor_model_parallel_group().device_group
         torch.distributed.all_reduce(image_embedding, group=group)
         return image_embedding
 
-    def _process_image_input(self, image_input: DotsOCRImageInputs) -> tuple[torch.Tensor, ...]:
+    def _process_image_input(
+        self, image_input: DotsOCRImageInputs
+    ) -> tuple[torch.Tensor, ...]:
         grid_thw = image_input["image_grid_thw"]
         assert grid_thw.ndim == 2
 
@@ -316,14 +355,19 @@ class DotsOCRForCausalLM(nn.Module, SupportsMultiModal):
         # Preserve the order of modalities if there are multiple of them
         # from the order of kwargs.
         for input_key in kwargs:
-            if input_key in ("pixel_values", "image_embeds") and "images" not in modalities:
+            if (
+                input_key in ("pixel_values", "image_embeds")
+                and "images" not in modalities
+            ):
                 modalities["images"] = self._parse_and_validate_image_input(**kwargs)
         return modalities
 
     def get_language_model(self) -> torch.nn.Module:
         return self.language_model
 
-    def get_multimodal_embeddings(self, **kwargs: object) -> Optional[MultiModalEmbeddings]:
+    def get_multimodal_embeddings(
+        self, **kwargs: object
+    ) -> Optional[MultiModalEmbeddings]:
         modalities = self._parse_and_validate_multimodal_inputs(**kwargs)
         if not modalities:
             return None
@@ -427,8 +471,13 @@ class DotsOCRForCausalLM(nn.Module, SupportsMultiModal):
 
 def patch_vllm_chat_placeholder():
     import vllm
+
     # return when vllm version > 0.9.1
-    if not (vllm.__version_tuple__[0]==0 and vllm.__version_tuple__[1] <= 9 and vllm.__version_tuple__[2] <= 1):
+    if not (
+        vllm.__version_tuple__[0] == 0
+        and vllm.__version_tuple__[1] <= 9
+        and vllm.__version_tuple__[2] <= 1
+    ):
         return
     from vllm.entrypoints.chat_utils import BaseMultiModalItemTracker
 
@@ -443,8 +492,10 @@ def patch_vllm_chat_placeholder():
 
     BaseMultiModalItemTracker._placeholder_str = _placeholder_str
 
+
 ModelRegistry.register_model(
-    "DotsOCRForCausalLM", DotsOCRForCausalLM,
+    "DotsOCRForCausalLM",
+    DotsOCRForCausalLM,
 )
 
 

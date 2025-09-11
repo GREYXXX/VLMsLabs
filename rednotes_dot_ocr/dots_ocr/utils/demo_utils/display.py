@@ -16,7 +16,7 @@ def is_valid_image_path(image_path):
         return False
 
     # Check if the file extension is one of the common image formats.
-    image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp']
+    image_extensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp"]
     _, extension = os.path.splitext(image_path)
     if extension.lower() in image_extensions:
         return True
@@ -30,14 +30,14 @@ def read_image(image_path, use_native=False):
 
     Args:
         image_path: The path to the image.
-        use_native: If True, the max dimension of the original image is used as the max size. 
+        use_native: If True, the max dimension of the original image is used as the max size.
                     If False, max size is set to 1024.
 
     Returns:
         tuple: (resized_image, original_width, original_height)
     """
     # Create a default 512x512 blue image as a fallback.
-    image = Image.new('RGB', (512, 512), color=(0, 0, 255))
+    image = Image.new("RGB", (512, 512), color=(0, 0, 255))
 
     if is_valid_image_path(image_path):
         image = Image.open(image_path)
@@ -49,13 +49,13 @@ def read_image(image_path, use_native=False):
         max_size = max(w, h)
     else:
         max_size = 1024
-        
+
     if w > h:
         new_w = max_size
         new_h = int(h * max_size / w)
     else:
         new_h = max_size
         new_w = int(w * max_size / h)
-        
+
     image = image.resize((new_w, new_h))
     return image, w, h

@@ -26,11 +26,13 @@ except ImportError:
 def rotate_half(x):
     """Rotates half the hidden dims of the input."""
     x1 = x[..., : x.shape[-1] // 2]
-    x2 = x[..., x.shape[-1] // 2:]
+    x2 = x[..., x.shape[-1] // 2 :]
     return torch.cat((-x2, x1), dim=-1)
 
 
-def apply_rotary_pos_emb_vision(tensor: torch.Tensor, freqs: torch.Tensor) -> torch.Tensor:
+def apply_rotary_pos_emb_vision(
+    tensor: torch.Tensor, freqs: torch.Tensor
+) -> torch.Tensor:
     orig_dtype = tensor.dtype
     tensor = tensor.float()
 
@@ -54,22 +56,24 @@ class VisionRotaryEmbedding(nn.Module):
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
     def forward(self, seqlen: int) -> torch.Tensor:
-        seq = torch.arange(seqlen, device=self.inv_freq.device, dtype=self.inv_freq.dtype)
+        seq = torch.arange(
+            seqlen, device=self.inv_freq.device, dtype=self.inv_freq.dtype
+        )
         freqs = torch.outer(seq, self.inv_freq)
         return freqs
 
 
 class PatchMerger(nn.Module):
     def __init__(
-            self,
-            dim: int,
-            context_dim: int,
-            spatial_merge_size: int = 2,
-            pre_norm="layernorm",
-            init_merger_std=None,
+        self,
+        dim: int,
+        context_dim: int,
+        spatial_merge_size: int = 2,
+        pre_norm="layernorm",
+        init_merger_std=None,
     ) -> None:
         super().__init__()
-        self.hidden_size = context_dim * (spatial_merge_size ** 2)
+        self.hidden_size = context_dim * (spatial_merge_size**2)
         self.pre_norm = pre_norm
         if self.pre_norm == "layernorm":
             self.ln_q = LayerNorm(context_dim, eps=1e-6)
@@ -107,22 +111,34 @@ class VisionAttention(nn.Module):
         self.proj = nn.Linear(dim, dim, bias=bias)
 
     def forward(
-            self,
-            hidden_states: torch.Tensor,
-            cu_seqlens: torch.Tensor,
-            rotary_pos_emb: torch.Tensor = None,
+        self,
+        hidden_states: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        rotary_pos_emb: torch.Tensor = None,
     ) -> torch.Tensor:
         seq_length = hidden_states.shape[0]
 
-        q, k, v = self.qkv(hidden_states).reshape(seq_length, 3, self.num_heads, -1).permute(1, 0, 2, 3).unbind(0)
+        q, k, v = (
+            self.qkv(hidden_states)
+            .reshape(seq_length, 3, self.num_heads, -1)
+            .permute(1, 0, 2, 3)
+            .unbind(0)
+        )
         q = apply_rotary_pos_emb_vision(q.unsqueeze(0), rotary_pos_emb).squeeze(0)
         k = apply_rotary_pos_emb_vision(k.unsqueeze(0), rotary_pos_emb).squeeze(0)
 
         attention_mask = torch.full(
-            [1, seq_length, seq_length], torch.finfo(q.dtype).min, device=q.device, dtype=q.dtype
+            [1, seq_length, seq_length],
+            torch.finfo(q.dtype).min,
+            device=q.device,
+            dtype=q.dtype,
         )
         for i in range(1, len(cu_seqlens)):
-            attention_mask[..., cu_seqlens[i - 1]: cu_seqlens[i], cu_seqlens[i - 1]: cu_seqlens[i]] = 0
+            attention_mask[
+                ...,
+                cu_seqlens[i - 1] : cu_seqlens[i],
+                cu_seqlens[i - 1] : cu_seqlens[i],
+            ] = 0
 
         q = q.transpose(0, 1)
         k = k.transpose(0, 1)
@@ -130,9 +146,9 @@ class VisionAttention(nn.Module):
         attn_weights = torch.matmul(q, k.transpose(1, 2)) / math.sqrt(self.head_dim)
         attn_weights = attn_weights + attention_mask
 
-        # Originally use 
+        # Originally use
         # attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(q.dtype)
-        # Changed to use fp16 to save memory, or it will be OOM
+        # Changed to use fp16 to save memory
         attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=q.dtype)
         attn_output = torch.matmul(attn_weights, v)
         attn_output = attn_output.transpose(0, 1)
@@ -151,20 +167,30 @@ class VisionFlashAttention2(nn.Module):
         self.is_causal = config.is_causal
 
     def forward(
-            self,
-            hidden_states: torch.Tensor,
-            cu_seqlens: torch.Tensor,
-            rotary_pos_emb: torch.Tensor = None,
+        self,
+        hidden_states: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        rotary_pos_emb: torch.Tensor = None,
     ) -> torch.Tensor:
         seq_length = hidden_states.shape[0]
         q, k, v = (
-            self.qkv(hidden_states).reshape(seq_length, 3, self.num_heads, -1).permute(1, 0, 2, 3).unbind(0)
+            self.qkv(hidden_states)
+            .reshape(seq_length, 3, self.num_heads, -1)
+            .permute(1, 0, 2, 3)
+            .unbind(0)
         )  # 'shd'
         q = apply_rotary_pos_emb_vision(q.unsqueeze(0), rotary_pos_emb).squeeze(0)
         k = apply_rotary_pos_emb_vision(k.unsqueeze(0), rotary_pos_emb).squeeze(0)
         max_seqlen = (cu_seqlens[1:] - cu_seqlens[:-1]).max().item()
         attn_output = flash_attn_varlen_func(
-            q, k, v, cu_seqlens, cu_seqlens, max_seqlen, max_seqlen, causal=self.is_causal
+            q,
+            k,
+            v,
+            cu_seqlens,
+            cu_seqlens,
+            max_seqlen,
+            max_seqlen,
+            causal=self.is_causal,
         ).reshape(seq_length, -1)
         attn_output = self.proj(attn_output)
 
@@ -180,14 +206,19 @@ class VisionAttentionV2(nn.Module):
         self.proj = nn.Linear(dim, dim, bias=bias)
 
     def forward(
-            self,
-            hidden_states: torch.Tensor,
-            cu_seqlens: torch.Tensor,
-            rotary_pos_emb: torch.Tensor = None,
+        self,
+        hidden_states: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        rotary_pos_emb: torch.Tensor = None,
     ) -> torch.Tensor:
         seq_length = hidden_states.shape[0]
 
-        q, k, v = self.qkv(hidden_states).reshape(seq_length, 3, self.num_heads, -1).permute(1, 0, 2, 3).unbind(0)
+        q, k, v = (
+            self.qkv(hidden_states)
+            .reshape(seq_length, 3, self.num_heads, -1)
+            .permute(1, 0, 2, 3)
+            .unbind(0)
+        )
         q = apply_rotary_pos_emb_vision(q.unsqueeze(0), rotary_pos_emb).squeeze(0)
         k = apply_rotary_pos_emb_vision(k.unsqueeze(0), rotary_pos_emb).squeeze(0)
 
@@ -196,8 +227,10 @@ class VisionAttentionV2(nn.Module):
         q_list = torch.split(q, seqlens, 0)
         k_list = torch.split(k, seqlens, 0)
         v_list = torch.split(v, seqlens, 0)
-        # eager attention  空间复杂度为 O(n^2) , n 为  b*s（batch_size * seq_len）,  序列太长容易OOM， 这个实现 更具batch 切分 seq
-        # 减少内存需求， 计算相对 continus  batching 较慢。
+
+        # Eager attention has a space complexity of O(n^2), where n is b*s (batch_size * seq_len).
+        # Long sequences can easily lead to OOM (Out Of Memory) errors.
+        # This implementation splits the sequence based on the batch to reduce memory requirements,
         outputs = []
         for q_i, k_i, v_i in zip(q_list, k_list, v_list):
             q_i = q_i.transpose(0, 1)
@@ -225,29 +258,45 @@ class VisionAscendAttention(nn.Module):
         self.config = config
 
     def forward(
-            self,
-            hidden_states: torch.Tensor,
-            cu_seqlens: torch.Tensor,
-            rotary_pos_emb: torch.Tensor = None,
+        self,
+        hidden_states: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        rotary_pos_emb: torch.Tensor = None,
     ) -> torch.Tensor:
         seq_length = hidden_states.shape[0]
-        q, k, v = self.qkv(hidden_states).reshape(seq_length, 3, self.num_heads, -1).permute(1, 0, 2, 3).unbind(0)
+        q, k, v = (
+            self.qkv(hidden_states)
+            .reshape(seq_length, 3, self.num_heads, -1)
+            .permute(1, 0, 2, 3)
+            .unbind(0)
+        )
 
         q = apply_rotary_pos_emb_vision(q.unsqueeze(0), rotary_pos_emb).squeeze(0)
         k = apply_rotary_pos_emb_vision(k.unsqueeze(0), rotary_pos_emb).squeeze(0)
 
-        attention_mask = torch.ones([1, seq_length, seq_length], device=q.device, dtype=torch.bool)
+        attention_mask = torch.ones(
+            [1, seq_length, seq_length], device=q.device, dtype=torch.bool
+        )
         for i in range(1, len(cu_seqlens)):
-            attention_mask[..., cu_seqlens[i - 1]: cu_seqlens[i], cu_seqlens[i - 1]: cu_seqlens[i]] = False
+            attention_mask[
+                ...,
+                cu_seqlens[i - 1] : cu_seqlens[i],
+                cu_seqlens[i - 1] : cu_seqlens[i],
+            ] = False
 
         q = q.transpose(0, 1).unsqueeze(0)
         k = k.transpose(0, 1).unsqueeze(0)
         v = v.transpose(0, 1).unsqueeze(0)
 
-        attn_output = torch_npu.npu_prompt_flash_attention(q, k, v,
-                                                           atten_mask=attention_mask,
-                                                           num_heads=self.num_heads, input_layout="BNSD",
-                                                           scale_value=self.head_dim ** -0.5)
+        attn_output = torch_npu.npu_prompt_flash_attention(
+            q,
+            k,
+            v,
+            atten_mask=attention_mask,
+            num_heads=self.num_heads,
+            input_layout="BNSD",
+            scale_value=self.head_dim**-0.5,
+        )
         attn_output = attn_output.squeeze(0).transpose(0, 1)
         attn_output = attn_output.reshape(seq_length, -1)
         attn_output = self.proj(attn_output)
@@ -263,26 +312,39 @@ class VisionSdpaAttention(nn.Module):
         self.config = config
 
     def forward(
-            self,
-            hidden_states: torch.Tensor,
-            cu_seqlens: torch.Tensor,
-            rotary_pos_emb: torch.Tensor = None,
+        self,
+        hidden_states: torch.Tensor,
+        cu_seqlens: torch.Tensor,
+        rotary_pos_emb: torch.Tensor = None,
     ) -> torch.Tensor:
         seq_length = hidden_states.shape[0]
-        q, k, v = self.qkv(hidden_states).reshape(seq_length, 3, self.num_heads, -1).permute(1, 0, 2, 3).unbind(0)
+        q, k, v = (
+            self.qkv(hidden_states)
+            .reshape(seq_length, 3, self.num_heads, -1)
+            .permute(1, 0, 2, 3)
+            .unbind(0)
+        )
 
         q = apply_rotary_pos_emb_vision(q.unsqueeze(0), rotary_pos_emb).squeeze(0)
         k = apply_rotary_pos_emb_vision(k.unsqueeze(0), rotary_pos_emb).squeeze(0)
 
-        attention_mask = torch.zeros([1, seq_length, seq_length], device=q.device, dtype=torch.bool)
+        attention_mask = torch.zeros(
+            [1, seq_length, seq_length], device=q.device, dtype=torch.bool
+        )
         for i in range(1, len(cu_seqlens)):
-            attention_mask[..., cu_seqlens[i - 1]: cu_seqlens[i], cu_seqlens[i - 1]: cu_seqlens[i]] = True
+            attention_mask[
+                ...,
+                cu_seqlens[i - 1] : cu_seqlens[i],
+                cu_seqlens[i - 1] : cu_seqlens[i],
+            ] = True
 
         q = q.transpose(0, 1)
         k = k.transpose(0, 1)
         v = v.transpose(0, 1)
 
-        attn_output = F.scaled_dot_product_attention(q, k, v, attention_mask, dropout_p=0.0)
+        attn_output = F.scaled_dot_product_attention(
+            q, k, v, attention_mask, dropout_p=0.0
+        )
         attn_output = attn_output.transpose(0, 1)
         attn_output = attn_output.reshape(seq_length, -1)
 
@@ -292,10 +354,10 @@ class VisionSdpaAttention(nn.Module):
 
 DOTS_VISION_ATTENTION_CLASSES = {
     "eager": VisionAttention,
-    "eager_v2": VisionAttentionV2,  # 内存更少
+    "eager_v2": VisionAttentionV2,  # Less memory usage
     "flash_attention_2": VisionFlashAttention2,
     "sdpa": VisionSdpaAttention,
-    "ascend_fa": VisionAscendAttention,  # ascend， 长序列精度下降严重。
+    "ascend_fa": VisionAscendAttention,  # Ascend, long sequences have serious accuracy degradation.
 }
 
 
@@ -350,7 +412,13 @@ class DotsPatchEmbed(nn.Module):
         self.norm = RMSNorm(config.embed_dim, eps=config.rms_norm_eps)
 
     def forward(self, x: torch.Tensor, grid_thw=None) -> torch.Tensor:
-        x = x.view(-1, self.num_channels, self.temporal_patch_size, self.patch_size, self.patch_size)[:, :, 0]
+        x = x.view(
+            -1,
+            self.num_channels,
+            self.temporal_patch_size,
+            self.patch_size,
+            self.patch_size,
+        )[:, :, 0]
         x = self.proj(x).view(-1, self.embed_dim)
         x = self.norm(x)
         return x
@@ -384,7 +452,10 @@ class DotsVisionBlock(nn.Module):
             print("flash attention not available! fallback to eager implementation ")
 
         self.attn = DOTS_VISION_ATTENTION_CLASSES[attn_implementation](
-            config, config.embed_dim, num_heads=config.num_attention_heads, bias=config.use_bias
+            config,
+            config.embed_dim,
+            num_heads=config.num_attention_heads,
+            bias=config.use_bias,
         )
         self.norm1 = RMSNorm(config.embed_dim, eps=config.rms_norm_eps)
         self.mlp = DotsSwiGLUFFN(config)
@@ -392,7 +463,9 @@ class DotsVisionBlock(nn.Module):
 
     def forward(self, hidden_states, cu_seqlens, rotary_pos_emb) -> torch.Tensor:
         hidden_states = hidden_states + self.attn(
-            self.norm1(hidden_states), cu_seqlens=cu_seqlens, rotary_pos_emb=rotary_pos_emb
+            self.norm1(hidden_states),
+            cu_seqlens=cu_seqlens,
+            rotary_pos_emb=rotary_pos_emb,
         )
         hidden_states = hidden_states + self.mlp(self.norm2(hidden_states))
         return hidden_states
@@ -413,7 +486,10 @@ class DotsVisionTransformer(PreTrainedModel):
 
         _num_hidden_layers = config.num_hidden_layers
         self.blocks = nn.ModuleList(
-            [DotsVisionBlock(config, config.attn_implementation) for _ in range(_num_hidden_layers)]
+            [
+                DotsVisionBlock(config, config.attn_implementation)
+                for _ in range(_num_hidden_layers)
+            ]
         )
 
         if self.config.post_norm:
@@ -470,9 +546,7 @@ class DotsVisionTransformer(PreTrainedModel):
             )
             wpos_ids = wpos_ids.permute(0, 2, 1, 3)
             wpos_ids = wpos_ids.flatten()
-            pos_ids.append(
-                torch.stack([hpos_ids, wpos_ids], dim=-1).repeat(t, 1)
-            )
+            pos_ids.append(torch.stack([hpos_ids, wpos_ids], dim=-1).repeat(t, 1))
 
         return pos_ids
 
@@ -484,14 +558,18 @@ class DotsVisionTransformer(PreTrainedModel):
         rotary_pos_emb = rotary_pos_emb_full[pos_ids].flatten(1)
         return rotary_pos_emb
 
-    def forward(self, hidden_states: torch.Tensor, grid_thw: torch.Tensor, bf16=True) -> torch.Tensor:
+    def forward(
+        self, hidden_states: torch.Tensor, grid_thw: torch.Tensor, bf16=True
+    ) -> torch.Tensor:
         if bf16:
             hidden_states = hidden_states.bfloat16()
         hidden_states = self.patch_embed(hidden_states, grid_thw)
 
         rotary_pos_emb = self.rot_pos_emb(grid_thw)
 
-        cu_seqlens = torch.repeat_interleave(grid_thw[:, 1] * grid_thw[:, 2], grid_thw[:, 0]).cumsum(
+        cu_seqlens = torch.repeat_interleave(
+            grid_thw[:, 1] * grid_thw[:, 2], grid_thw[:, 0]
+        ).cumsum(
             dim=0,
             dtype=grid_thw.dtype if torch.jit.is_tracing() else torch.int32,
         )
@@ -506,11 +584,12 @@ class DotsVisionTransformer(PreTrainedModel):
                     rotary_pos_emb,
                 )
             else:
-                hidden_states = blk(hidden_states, cu_seqlens=cu_seqlens, rotary_pos_emb=rotary_pos_emb)
+                hidden_states = blk(
+                    hidden_states, cu_seqlens=cu_seqlens, rotary_pos_emb=rotary_pos_emb
+                )
 
         if self.config.post_norm:
             hidden_states = self.post_trunk_norm(hidden_states)
 
         hidden_states = self.merger(hidden_states)
         return hidden_states
-

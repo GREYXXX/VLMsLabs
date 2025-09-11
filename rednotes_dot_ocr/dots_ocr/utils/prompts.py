@@ -18,16 +18,12 @@ dict_promptmode_to_prompt = {
 
 5. Final Output: The entire output must be a single JSON object.
 """,
-
     # prompt_layout_only_en: layout detection
     "prompt_layout_only_en": """Please output the layout information from this PDF image, including each layout's bbox and its category. The bbox should be in the format [x1, y1, x2, y2]. The layout categories for the PDF document include ['Caption', 'Footnote', 'Formula', 'List-item', 'Page-footer', 'Page-header', 'Picture', 'Section-header', 'Table', 'Text', 'Title']. Do not output the corresponding text. The layout result should be in JSON format.""",
-
     # prompt_layout_only_en: parse ocr text except the Page-header and Page-footer
     "prompt_ocr": """Extract the text content from this image.""",
-
     # prompt_grounding_ocr: extract text content in the given bounding box
     "prompt_grounding_ocr": """Extract text from the given bounding box on the image (format: [x1, y1, x2, y2]).\nBounding Box:\n""",
-
     # "prompt_table_html": """Convert the table in this image to HTML.""",
     # "prompt_table_latex": """Convert the table in this image to LaTeX.""",
     # "prompt_formula_latex": """Convert the formula in this image to LaTeX.""",
